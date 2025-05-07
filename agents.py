@@ -1,58 +1,92 @@
-'''
-Only added line that prevents an error or unnecessary calculations when no empty cells are in range
-'''
+from __future__ import annotations
 import math
-## Using experimental agent type with native "cell" property that saves its current position in cellular grid
-from mesa.experimental.cell_space import CellAgent
+import mesa
 
-## Helper function to get distance between two cells
-def get_distance(cell_1, cell_2):
-    x1, y1 = cell_1.coordinate
-    x2, y2 = cell_2.coordinate
-    dx = x1 - x2
-    dy = y1 - y2
-    return math.sqrt(dx**2 + dy**2)
 
-class SugarAgent(CellAgent):
-    ## Initiate agent, inherit model property from parent class
-    def __init__(self, model, cell, sugar=0, metabolism=0, vision=0):
-        super().__init__(model)
-        self.cell = cell
-        self.sugar = sugar
-        self.metabolism = metabolism
-        self.vision = vision
+class PlanetAgent(mesa.Agent):
+    """
+    One civilization (“planet”).
+      tech_level : int 1‑1000 (continuous)
+      aggressive : True  = Dark‑Forest doctrine (red)
+                   False = signalling/peaceful (green)
+    """
+    def __init__(self, uid: int, model: "DarkForestModel",
+                 tech_level: int, aggressive: bool):
+        super().__init__(uid, model)
+        self.tech_level = tech_level
+        self.aggressive = aggressive
+        self.alive      = True
 
-    ## Define movement action
-    def move(self):
-        possibles = [
-            cell
-            for cell in self.cell.get_neighborhood(self.vision, include_center=True)
-            if cell.is_empty
-        ]
-        if not possibles:
-            return  # NEW: If no empty cells available, do nothing and skip movement
+    # ---------- dynamic radii (scaled linearly with tech) -------------- #
+    @property
+    def detection_radius(self) -> int:
+        return int(round(self.model.det_base + self.tech_level * self.model.det_factor))
 
-        sugar_values = [cell.sugar for cell in possibles]
-        max_sugar = max(sugar_values)
-        candidates_index = [
-            i for i, val in enumerate(sugar_values) if math.isclose(val, max_sugar)
-        ]
-        candidates = [possibles[i] for i in candidates_index]
-        min_dist = min(get_distance(self.cell, c) for c in candidates)
-        final_candidates = [
-            c for c in candidates
-            if math.isclose(get_distance(self.cell, c), min_dist, rel_tol=1e-02)
-        ]
-        self.cell = self.random.choice(final_candidates)
+    @property
+    def attack_radius(self) -> int:
+        return int(round(self.model.att_base + self.tech_level * self.model.att_factor))
 
-    ## Consume sugar in current cell, then pay metabolic cost
-    def gather_and_eat(self):
-        self.sugar += self.cell.sugar
-        self.cell.sugar = 0
-        self.sugar -= self.metabolism
+    # ------------------------------------------------------------------- #
+    def step(self) -> None:
+        if not self.alive:
+            return
 
-    ## If an agent has zero or negative sugar, remove it from the model
-    def see_if_die(self):
-        if self.sugar <= 0:
-            self.remove()
+        # --- steady exponential growth ---------------------------------
+        p_growth = (self.model.tech_growth_aggressive
+                    if self.aggressive else self.model.tech_growth_peaceful)
+        if self.random.random() < p_growth:
+            new_level = int(self.tech_level * self.model.tech_exponent)
+            if new_level <= self.tech_level:          # guarantee progress
+                new_level = self.tech_level + 1
+            self.tech_level = min(new_level, 1000)
+
+        # --- occasional tech explosion ---------------------------------
+        if self.random.random() < self.model.tech_explosion_prob:
+            self.tech_level = min(self.tech_level + self.model.tech_explosion_jump, 1000)
+
+        # --- neighbourhood scan ----------------------------------------
+        neighbors = self.model.grid.get_neighbors(
+            self.pos, moore=True, include_center=False, radius=self.detection_radius
+        )
+        neighbors = [n for n in neighbors if getattr(n, "alive", False)]
+
+        # --- pre‑emptive strike ----------------------------------------
+        if self.aggressive and neighbors:
+            in_range = [
+                n for n in neighbors
+                if self._dist(n.pos, self.pos) <= self.attack_radius
+            ]
+            if in_range:
+                self._attack(self.random.choice(in_range))
+
+        # --- placeholder signalling risk -------------------------------
+        if (not self.aggressive) and self.random.random() < self.model.signal_prob:
+            pass
+
+    # ------------------------------------------------------------------- #
+    def _attack(self, target: "PlanetAgent") -> None:
+        """Probabilistic combat based on tech difference.
+        If attacker wins, annexes ½ of target's tech points."""
+        diff  = self.tech_level - target.tech_level
+        p_win = 0.5 + diff * self.model.battle_factor
+        p_win = max(0.0, min(1.0, p_win))            # clamp to [0,1]
+
+        if self.random.random() < p_win:
+            # attacker wins – annex half of the victim's tech
+            annex = target.tech_level // 2
+            self.tech_level = min(self.tech_level + annex, 1000)
+
+            target.alive = False
+            self.model.grid.remove_agent(target)
+            self.model.schedule.remove(target)
+        else:
+            # defender survives, becomes aggressive + slight jump
+            target.aggressive = True
+            target.tech_level = min(target.tech_level + 5, 1000)
+
+    # ------------------------------------------------------------------- #
+    @staticmethod
+    def _dist(a: tuple[int, int], b: tuple[int, int]) -> float:
+        return math.hypot(a[0] - b[0], a[1] - b[1])
+
 
