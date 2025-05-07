@@ -1,75 +1,80 @@
-'''
-Newly added model parameters that control progressive taxation.
-'''
-from model import SugarScapeModel
-from mesa.visualization import Slider, SolaraViz, make_plot_component
-from mesa.visualization.components.matplotlib_components import make_mpl_space_component
+from __future__ import annotations
+from mesa.visualization.ModularVisualization import ModularServer
+from mesa.visualization.modules import CanvasGrid, ChartModule
+from mesa.visualization.UserParam import Slider
+from model import DarkForestModel
 
-from model import SugarScapeModel
-from mesa.visualization import Slider, SolaraViz, make_plot_component
-from mesa.visualization.components.matplotlib_components import make_mpl_space_component
 
-def agent_portrayal(agent):
-    return {
-        "marker": "o",
-        "color": "red",
-        "size": 20,
-    }
+# ------------------------------------------------------------------- #
+def portrayal(agent) -> dict | None:
+    if not agent.alive:
+        return None
+    col = "red" if agent.aggressive else "green"
+    size = 2 + int(agent.tech_level ** 0.3 / 2)   # mild log scaling
+    return {"Shape": "circle", "Color": col, "r": size,
+            "Filled": "true", "Layer": 0}
 
-propertylayer_portrayal = {
-    "sugar": {
-        "color": "yellow",
-        "alpha": 0.8,
-        "colorbar": True,
-        "vmin": 0,
-        "vmax": 10,
-    },
-}
 
-sugarscape_space = make_mpl_space_component(
-    agent_portrayal=agent_portrayal,
-    propertylayer_portrayal=propertylayer_portrayal,
-    post_process=None,
-    draw_grid=False,
-)
-
-GiniPlot = make_plot_component("Gini")
-
+# ------------------------------------------------------------------- #
+#  Web‑UI sliders
+# ------------------------------------------------------------------- #
 model_params = {
-    "seed": {
-        "type": "InputText",
-        "value": 42,
-        "label": "Random Seed",
-    },
-    "width": 50,
-    "height": 50,
-    "initial_population": Slider("Initial Population", value=200, min=50, max=500, step=10),
-    "endowment_min": Slider("Min Initial Endowment", value=25, min=5, max=30, step=1),
-    "endowment_max": Slider("Max Initial Endowment", value=50, min=30, max=100, step=1),
-    "metabolism_min": Slider("Min Metabolism", value=1, min=1, max=3, step=1),
-    "metabolism_max": Slider("Max Metabolism", value=5, min=3, max=8, step=1),
-    "vision_min": Slider("Min Vision", value=1, min=1, max=3, step=1),
-    "vision_max": Slider("Max Vision", value=5, min=3, max=8, step=1),
+    # grid size
+    "grid_width":  Slider("Grid width", 50, 20, 100, 5),
+    "grid_height": Slider("Grid height", 50, 20, 100, 5),
 
-    # Progressive Taxation
-    "tax_threshold": Slider("Tax Threshold", value=50, min=0, max=200, step=10),
-    "tax_rate": Slider("Tax Rate", value=0.1, min=0.0, max=0.5, step=0.01),
+    # initial counts 0‑5 each
+    "num_t1":   Slider("# at tech 1",   2, 0, 5, 1),
+    "num_t2":   Slider("# at tech 2",   2, 0, 5, 1),
+    "num_t3":   Slider("# at tech 3",   2, 0, 5, 1),
+    "num_t4":   Slider("# at tech 4",   2, 0, 5, 1),
+    "num_t5":   Slider("# at tech 5",   2, 0, 5, 1),
+    "num_t100": Slider("# at tech 100", 1, 0, 5, 1),
+
+    # initial strategy mix
+    "aggressive_ratio": Slider("Aggressive fraction", 0.5, 0.0, 1.0, 0.05),
+
+    # tech dynamics
+    "tech_growth_aggressive": Slider("Growth p(aggr)", 0.02, 0.0, 0.2, 0.005),
+    "tech_growth_peaceful":   Slider("Growth p(peace)", 0.01, 0.0, 0.2, 0.005),
+    "tech_exponent":          Slider("Tech exponent", 1.10, 1.00, 1.30, 0.01),
+    "tech_explosion_prob":    Slider("Explosion prob", 0.003, 0.0, 0.05, 0.001),
+    "tech_explosion_jump":    Slider("+Tech on explosion", 50, 10, 200, 10),
+
+    # combat scaling
+    "battle_factor": Slider("Battle factor / tech diff", 0.01, 0.0, 0.05, 0.002),
+
+    # signalling
+    "signal_prob": Slider("Signal p(peaceful)", 0.10, 0.0, 1.0, 0.05),
+
+    # detection/attack scaling
+    "det_base":   Slider("Det base",   3.0, 0.0, 10.0, 0.5),
+    "det_factor": Slider("Det factor", 0.02, 0.0, 0.05, 0.002),
+    "att_base":   Slider("Att base",   2.0, 0.0, 10.0, 0.5),
+    "att_factor": Slider("Att factor", 0.015, 0.0, 0.05, 0.002),
 }
-# NEW: The two lines above add adjustable parameters for progressive taxation:
-# 'tax_threshold' = the sugar level above which agents are taxed
-# 'tax_rate'      = the fraction of sugar above threshold to be taxed
 
-model = SugarScapeModel()
+# visual modules
+grid = CanvasGrid(portrayal, 50, 50, 500, 500)
 
-page = SolaraViz(
-    model,
-    components=[
-        sugarscape_space,
-        GiniPlot,
-    ],
-    model_params=model_params,
-    name="Sugarscape",
-    play_interval=150,
+chart_counts = ChartModule([
+    {"Label": "Alive",      "Color": "blue"},
+    {"Label": "Aggressors", "Color": "red"},
+])
+
+chart_survival = ChartModule([
+    {"Label": "AggSurvival",   "Color": "red"},
+    {"Label": "PeaceSurvival", "Color": "green"},
+], data_collector_name="datacollector")
+
+# server
+server = ModularServer(
+    DarkForestModel,
+    [grid, chart_counts, chart_survival],
+    "Dark Forest – Annexation",
+    model_params
 )
 
-page
+if __name__ == "__main__":
+    server.port = 8521
+    server.launch()
