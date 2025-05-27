@@ -9,21 +9,18 @@ from model import DarkForestModel
 def portrayal(agent) -> dict | None:
     if not agent.alive:
         return None
-    col = "red" if agent.aggressive else "green"
+    col  = "red" if agent.aggressive else "green"
     size = 2 + int(agent.tech_level ** 0.3 / 2)   # mild log scaling
     return {"Shape": "circle", "Color": col, "r": size,
             "Filled": "true", "Layer": 0}
 
 
-# ------------------------------------------------------------------- #
-#  Web‑UI sliders
-# ------------------------------------------------------------------- #
 model_params = {
     # grid size
     "grid_width":  Slider("Grid width", 50, 20, 100, 5),
     "grid_height": Slider("Grid height", 50, 20, 100, 5),
 
-    # initial counts 0‑5 each
+    # initial counts 0-5 each
     "num_t1":   Slider("# at tech 1",   2, 0, 5, 1),
     "num_t2":   Slider("# at tech 2",   2, 0, 5, 1),
     "num_t3":   Slider("# at tech 3",   2, 0, 5, 1),
@@ -44,9 +41,10 @@ model_params = {
     # combat scaling
     "battle_factor": Slider("Battle factor / tech diff", 0.01, 0.0, 0.05, 0.002),
 
-    # signalling
-    "signal_prob": Slider("Signal p(peaceful)", 0.10, 0.0, 1.0, 0.05),
-
+    # signalling & collaboration
+    "signal_prob":       Slider("Signal p(peaceful)", 0.10, 0.0, 1.0, 0.05),
+    "collaboration_rate": Slider("Collab rate (%)",    5,    0,   50, 1,
+                                 description="Percent of own tech gained on cooperation"),
     # detection/attack scaling
     "det_base":   Slider("Det base",   3.0, 0.0, 10.0, 0.5),
     "det_factor": Slider("Det factor", 0.02, 0.0, 0.05, 0.002),
@@ -71,10 +69,11 @@ chart_survival = ChartModule([
 server = ModularServer(
     DarkForestModel,
     [grid, chart_counts, chart_survival],
-    "Dark Forest – Annexation",
+    "Dark Forest – Annexation & Collaboration",
     model_params
 )
 
 if __name__ == "__main__":
     server.port = 8521
     server.launch()
+
